@@ -1,4 +1,5 @@
-﻿using System.Numerics;
+﻿using System.IO;
+using System.Numerics;
 using FinalFantasy16Library.Files.MDL.Helpers;
 using FinalFantasy16Library.Files.SKL;
 using FinalFantasy16Library.Utils;
@@ -24,9 +25,10 @@ public class FaithModelToGLTFConverter
         IOModel iomodel = new IOModel();
 
         List<IOMaterial> materials = new List<IOMaterial>();
-        for (int i = 0; i < mdlFile.MaterialNames.Count; i++)
+        for (int i = 0; i < mdlFile.MaterialFileNames.Count; i++)
         {
-            IOMaterial material = new IOMaterial() { Name = mdlFile.MaterialNames[i], Label = mdlFile.MaterialNames[i] };
+            string matName = Path.GetFileNameWithoutExtension(mdlFile.MaterialFileNames[i]);
+            IOMaterial material = new IOMaterial() { Name = matName, Label = matName };
             materials.Add(material);
         }
 
@@ -51,7 +53,7 @@ public class FaithModelToGLTFConverter
                 
                 IOMesh iomesh = new IOMesh();
 
-                string materialName = mdlFile.MaterialNames[mesh.MaterialID];
+                string materialName = mesh.MaterialID < materials.Count ? materials[mesh.MaterialID].Name : "";
                 if (!string.IsNullOrWhiteSpace(materialName))
                 {
                     if (materialName.StartsWith("m_"))
@@ -238,6 +240,16 @@ public class FaithModelToGLTFConverter
                 {
                     Name = joint,
                 });
+            }
+        }
+
+        string matMapPath = Path.ChangeExtension(path, null) + "_materials.txt";
+        using (var writer = new StreamWriter(matMapPath))
+        {
+            for (int i = 0; i < mdlFile.MaterialFileNames.Count; i++)
+            {
+                string slotName = Path.GetFileNameWithoutExtension(mdlFile.MaterialFileNames[i]);
+                writer.WriteLine($"{slotName} = {mdlFile.MaterialFileNames[i]}");
             }
         }
 
