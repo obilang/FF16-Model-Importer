@@ -92,8 +92,10 @@ public class MtlFile
             return pos + amount;
         }
 
-        uint string_table_pos = (uint)(Align((int)(reader.Position + 4 +
-            numTexturePaths * 8 + numConstantTextures * 8), 16) + (int)dataSectionSize);
+        int extraBindRows = Unknown2 >> 8;
+        uint string_table_pos = (uint)Align(
+            Align((int)(reader.Position + 4 + numTexturePaths * 8 + numConstantTextures * 8), 16)
+            + paramSize + (numTotalTextures + extraBindRows * 16) * 2, 16);
 
         //shader
         ShaderPath = ReadString(reader, string_table_pos);
