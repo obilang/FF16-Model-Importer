@@ -53,12 +53,20 @@ namespace FinalFantasy16Library.Files.TERA;
 /// </summary>
 public class TeraFile
 {
-    /// <summary>Samples per tile edge in the height grid.</summary>
+    /// <summary>Samples stored per tile edge in the height grid (137).</summary>
     public const int HeightMapDim = 137;
-    /// <summary>Quads per tile edge (HeightMapDim - 1).</summary>
-    public const int TileQuads = HeightMapDim - 1;
-    /// <summary>World units spanned by a single tile on X/Z.</summary>
+    /// <summary>
+    /// Unique samples per tile edge before the overlap skirt. Neighbouring tiles
+    /// overlap by (HeightMapDim - TileStride) samples: tile[TileStride] on one
+    /// axis equals neighbour[0] exactly, verified across every tile pair. So the
+    /// last 9 rows/columns (indices 128..136) duplicate the next tile's leading
+    /// samples and must be dropped when stitching (except at the far edge).
+    /// </summary>
+    public const int TileStride = 128;
+    /// <summary>World units spanned by one tile stride on X/Z (128 samples).</summary>
     public const float TileWorldSpan = 64.0f;
+    /// <summary>World units between adjacent samples (64 / 128 = 0.5 m).</summary>
+    public const float SampleSpacing = TileWorldSpan / TileStride;
     /// <summary>Raw height unit -> world units.</summary>
     public const float HeightScale = 0.02f;
 

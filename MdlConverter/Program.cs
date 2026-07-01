@@ -42,10 +42,12 @@ public class Program
             Console.WriteLine("     MdlConverter.exe tree.spd8");
             Console.WriteLine("----------------------------------------");
             Console.WriteLine("- Export terrain (.tera) to a 16-bit grayscale heightmap .png:");
-            Console.WriteLine("     MdlConverter.exe e_e00200.tera");
+            Console.WriteLine("     MdlConverter.exe e_e00200.tera [-unreal]");
             Console.WriteLine("       Pixel values are the raw u16 heights.");
             Console.WriteLine("       Decode world height: worldY = pixel * 0.02 + bias");
             Console.WriteLine("       (the bias is printed on export).");
+            Console.WriteLine("       -unreal  flip vertically so it imports onto an Unreal");
+            Console.WriteLine("                Landscape with positive X scale and no yaw.");
             Console.WriteLine("----------------------------------------");
             Console.WriteLine("- Export MTL to JSON:");
             Console.WriteLine("     MdlConverter.exe material.mtl");
@@ -60,6 +62,10 @@ public class Program
 
         foreach (string arg in args)
         {
+            // Option flags (consumed by the handlers that need them).
+            if (arg.StartsWith("-"))
+                continue;
+
             if (arg.EndsWith(".tex"))
                 HandleTexToImageConversion(arg);
             else if (arg.EndsWith(".tex.png"))
@@ -71,7 +77,7 @@ public class Program
             else if(arg.EndsWith(".spd8"))
                 ExportSpeedTreeToGLTF(arg);
             else if(arg.EndsWith(".tera"))
-                ExportTerrainToHeightmap(arg);
+                ExportTerrainToHeightmap(args, arg);
             else if(arg.EndsWith(".mtl"))
                 ConvertMtlToMaterialJson(arg);
             else if(arg.EndsWith(".mtl.json"))
@@ -245,11 +251,15 @@ public class Program
         }
     }
 
-    private static void ExportTerrainToHeightmap(string arg)
+    private static void ExportTerrainToHeightmap(string[] args, string arg)
     {
         string fullPath = Path.GetFullPath(arg);
         string dir = Path.GetDirectoryName(fullPath);
         string modelFileName = Path.GetFileNameWithoutExtension(arg);
+
+        // -unreal: bake the axis mirror into the pixels so the Unreal Landscape
+        // needs no negative scale and no yaw.
+        bool unreal = args.Any(x => x.Equals("-unreal", StringComparison.OrdinalIgnoreCase));
 
         TeraFile tera;
         try
@@ -273,18 +283,56 @@ public class Program
         string outPath = Path.Combine(dir, $"{modelFileName}.png");
         try
         {
-            var result = TeraHeightmapExporter.Export(tera, outPath);
-            Console.WriteLine($"Heightmap: {result.Width}x{result.Height} 16-bit grayscale");
+            var result = TeraHeightmapExporter.Export(tera, outPath, unreal);
+            Console.WriteLine($"Heightmap: {result.Width}x{result.Height} 16-bit grayscale" +
+                              (unreal ? " (Unreal-friendly: vertically flipped)" : ""));
             Console.WriteLine($"Populated region: {result.TileColumns}x{result.TileRows} tiles " +
                               $"at grid col {result.TileColumn}, row {result.TileRow} " +
                               $"(of {tera.GridDim}x{tera.GridDim})");
             Console.WriteLine($"Height decode: worldY = pixel * {TeraFile.HeightScale} + {tera.HeightBias}");
+
+            PrintUnrealTransform(tera, result, unreal);
+
             Console.WriteLine($"File saved as '{outPath}'");
         }
         catch (Exception ex)
         {
             Console.WriteLine($"WARN: Failed to export terrain heightmap: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Prints the Unreal Landscape transform that reproduces FFXVI world scale.
+    /// ScaleZ and LocationZ are exact; ScaleXY is exact (0.5 m/sample -> 50 UU).
+    /// The XY *location* is the terrain's placement in the level (from the map
+    /// binary), so only its scale/rotation/Z are emitted as absolutes.
+    /// </summary>
+    private static void PrintUnrealTransform(TeraFile tera, TeraHeightmapExporter.Result result, bool unreal)
+    {
+        // Unreal: WorldZ = (pixel - 32768) * (ScaleZ / 128) + LocationZ.
+        // FFXVI:  WorldZ_UU = pixel * (HeightScale * 100) + HeightBias * 100.
+        // Match slope: ScaleZ = HeightScale * 100 * 128 = 256. Then:
+        //   LocationZ = HeightBias * 100 + 32768 * (ScaleZ / 128)
+        const float scaleZ = TeraFile.HeightScale * 100f * 128f;      // 256
+        const float uuPerMeter = 100f;
+        float locationZ = tera.HeightBias * uuPerMeter + 32768f * (scaleZ / 128f);
+        float scaleXY = TeraFile.SampleSpacing * uuPerMeter;          // 0.5 m -> 50 UU
+
+        Console.WriteLine("Unreal Landscape transform (import PNG, fill data):");
+        if (unreal)
+        {
+            Console.WriteLine($"  RelativeScale3D  = (X={scaleXY:0.######}, Y={scaleXY:0.######}, Z={scaleZ:0.######})");
+            Console.WriteLine($"  RelativeRotation = (Pitch=0, Yaw=0, Roll=0)");
+        }
+        else
+        {
+            Console.WriteLine($"  RelativeScale3D  = (X=-{scaleXY:0.######}, Y={scaleXY:0.######}, Z={scaleZ:0.######})");
+            Console.WriteLine($"  RelativeRotation = (Pitch=0, Yaw=180, Roll=0)");
+            Console.WriteLine($"  (or re-export with -unreal for positive X scale and no yaw)");
+        }
+        Console.WriteLine($"  RelativeLocation = (X=<place>, Y=<place>, Z={locationZ:0.######})");
+        Console.WriteLine($"  Location XY is the terrain's placement in the level (map binary);");
+        Console.WriteLine($"  ScaleXY {scaleXY:0.###}, ScaleZ {scaleZ:0.###} and Z {locationZ:0.###} are exact.");
     }
 
     private static void HandleModelFolderToModelConversion(string arg)
