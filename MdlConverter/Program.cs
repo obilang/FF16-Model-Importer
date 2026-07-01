@@ -5,7 +5,13 @@ using FinalFantasy16Library.Files.MTL;
 using FinalFantasy16Library.Files.PAC;
 using FinalFantasy16Library.Files.PZDF;
 using FinalFantasy16Library.Files.SKL;
+using FinalFantasy16Library.Files.SPD;
+using FinalFantasy16Library.Files.SPD.Convert;
+using FinalFantasy16Library.Files.TERA;
+using FinalFantasy16Library.Files.TERA.Convert;
 using FinalFantasy16Library.Files.TEX;
+
+// TERA terrain exports as a 16-bit heightmap image; see TeraHeightmapExporter.
 
 using Newtonsoft.Json;
 
@@ -32,6 +38,15 @@ public class Program
             Console.WriteLine("- Export ANMB (Havok) to GLTF(animation):");
             Console.WriteLine("     MdlConverter.exe animation.anmb body_base.skl");
             Console.WriteLine("----------------------------------------");
+            Console.WriteLine("- Export SpeedTree (.spd8) geometry to .glb (one folder, one file per LOD):");
+            Console.WriteLine("     MdlConverter.exe tree.spd8");
+            Console.WriteLine("----------------------------------------");
+            Console.WriteLine("- Export terrain (.tera) to a 16-bit grayscale heightmap .png:");
+            Console.WriteLine("     MdlConverter.exe e_e00200.tera");
+            Console.WriteLine("       Pixel values are the raw u16 heights.");
+            Console.WriteLine("       Decode world height: worldY = pixel * 0.02 + bias");
+            Console.WriteLine("       (the bias is printed on export).");
+            Console.WriteLine("----------------------------------------");
             Console.WriteLine("- Export MTL to JSON:");
             Console.WriteLine("     MdlConverter.exe material.mtl");
             Console.WriteLine("- Import JSON to MTL (will overwrite if exists):");
@@ -53,6 +68,10 @@ public class Program
                 HandleModelFolderToModelConversion(arg);
             else if(arg.EndsWith(".mdl"))
                 ExportModelToGLTF(args, arg);
+            else if(arg.EndsWith(".spd8"))
+                ExportSpeedTreeToGLTF(arg);
+            else if(arg.EndsWith(".tera"))
+                ExportTerrainToHeightmap(arg);
             else if(arg.EndsWith(".mtl"))
                 ConvertMtlToMaterialJson(arg);
             else if(arg.EndsWith(".mtl.json"))
@@ -183,6 +202,89 @@ public class Program
 
         for (int i = 0; i < mdlFile.LODModels.Count; i++)
             FaithModelToGLTFConverter.Convert(mdlFile, skeletons, Path.Combine(outDir, $"{modelFileName}_LOD{i}.glb"), i);
+    }
+
+    private static void ExportSpeedTreeToGLTF(string arg)
+    {
+        string fullPath = Path.GetFullPath(arg);
+        string dir = Path.GetDirectoryName(fullPath);
+        string modelFileName = Path.GetFileNameWithoutExtension(arg);
+
+        SpdFile spd;
+        try
+        {
+            spd = new SpdFile(File.OpenRead(arg));
+        }
+        catch (InvalidDataException ex)
+        {
+            Console.WriteLine($"'{modelFileName}': {ex.Message}");
+            return;
+        }
+
+        if (spd.Lods.Count == 0)
+        {
+            Console.WriteLine($"'{modelFileName}' contains no extractable geometry (VFX/config-only asset).");
+            return;
+        }
+
+        string outDir = Path.Combine(dir, modelFileName);
+        if (!Directory.Exists(outDir))
+            Directory.CreateDirectory(outDir);
+
+        Console.WriteLine($"SpeedTree '{modelFileName}': {spd.Lods.Count} LOD(s)");
+        for (int i = 0; i < spd.Lods.Count; i++)
+        {
+            try
+            {
+                SpdModelToGLTFConverter.Convert(spd, Path.Combine(outDir, $"{modelFileName}_LOD{i}.glb"), i);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"WARN: Failed to export LOD{i}: {ex.Message}");
+            }
+        }
+    }
+
+    private static void ExportTerrainToHeightmap(string arg)
+    {
+        string fullPath = Path.GetFullPath(arg);
+        string dir = Path.GetDirectoryName(fullPath);
+        string modelFileName = Path.GetFileNameWithoutExtension(arg);
+
+        TeraFile tera;
+        try
+        {
+            tera = new TeraFile(File.OpenRead(arg));
+        }
+        catch (InvalidDataException ex)
+        {
+            Console.WriteLine($"'{modelFileName}': {ex.Message}");
+            return;
+        }
+
+        if (tera.Tiles.Count == 0)
+        {
+            Console.WriteLine($"'{modelFileName}' contains no extractable terrain tiles.");
+            return;
+        }
+
+        Console.WriteLine($"Terrain '{modelFileName}': {tera.GridDim}x{tera.GridDim} tiles ({tera.Tiles.Count} decoded)");
+
+        string outPath = Path.Combine(dir, $"{modelFileName}.png");
+        try
+        {
+            var result = TeraHeightmapExporter.Export(tera, outPath);
+            Console.WriteLine($"Heightmap: {result.Width}x{result.Height} 16-bit grayscale");
+            Console.WriteLine($"Populated region: {result.TileColumns}x{result.TileRows} tiles " +
+                              $"at grid col {result.TileColumn}, row {result.TileRow} " +
+                              $"(of {tera.GridDim}x{tera.GridDim})");
+            Console.WriteLine($"Height decode: worldY = pixel * {TeraFile.HeightScale} + {tera.HeightBias}");
+            Console.WriteLine($"File saved as '{outPath}'");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"WARN: Failed to export terrain heightmap: {ex.Message}");
+        }
     }
 
     private static void HandleModelFolderToModelConversion(string arg)
